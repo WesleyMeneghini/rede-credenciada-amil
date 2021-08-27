@@ -34,7 +34,6 @@ function Mask($tipoMask, $str)
         return null;
     } else {
 
-        echo 
         $str = str_replace(" ", "", $str);
 
         for ($i = 0; $i < strlen($str); $i++) {

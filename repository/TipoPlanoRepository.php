@@ -18,11 +18,11 @@ function getByNameTipoPlano($plano, $idOperadoras)
     $select = mysqli_query($conect, $sql);
     if ($rs = mysqli_fetch_assoc($select)) {
         $plano = new TipoPlano();
-        $plano->setId = $rs['id'];
-        $plano->setTitulo = $rs['titulo'];
-        $plano->setIdOperadora = $rs['id_operadora'];
-        $plano->setIdCategoriaPlano = $rs['id_categoria_plano'];
-        $plano->setReembolso = $rs['reembolso'];
+        $plano->setId($rs['id']);
+        $plano->setTitulo($rs['titulo']);
+        $plano->setIdOperadora($rs['id_operadora']);
+        $plano->setIdCategoriaPlano($rs['id_categoria_plano']);
+        $plano->setReembolso($rs['reembolso']);
 
         return $plano;
     }
