@@ -2,7 +2,9 @@
 
 
 function Mask($tipoMask, $str)
-{
+{   
+    $str = preg_replace("/\r|\n|-| /", "",  $str);
+    $tipoMask = strtolower($tipoMask);
 
     if (strlen($tipoMask) == 10 && ($tipoMask == "telefone" || $tipoMask == "celular")) {
         $tipoMask = "telefone";
