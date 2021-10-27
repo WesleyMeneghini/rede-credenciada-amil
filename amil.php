@@ -1,84 +1,38 @@
 <?php
 
-require_once("./includes/config.php");
-require_once("./rede-credenciada/repository/RedeRepository.php");
-require_once("./rede-credenciada/model/TipoPlano.php");
-require_once "utils/mask.php";
+$path = __DIR__;
 
-$conect = conexaoMysqlTestDev();
+require_once "$path/../includes/config.php";
+require_once "$path/repository/RedeRepository.php";
+require_once "$path/model/TipoPlano.php";
+require_once "$path/utils/mask.php";
+require_once "$path/services/requests.php";
 
+$conect = conexaoMysql();
 
 $logTipoServicos = true;
 $logEspecialidade = true;
 $logPrestadores = true;
-
-
 
 $salvarNovoTipoServico = true;
 $salvarNovoPrestadore = true;
 $salvarNovaEspecialidade = true;
 $salvarNovoEstabelecimento = true;
 
-
-
 $estado = "SP";
 $municipio = "SAO PAULO";
 $bairro = "TODOS OS BAIRROS";
 
-$curl = curl_init();
+$res = sendRequest(
+    "https://www.amil.com.br/institucional/api/InstitucionalMiddleware/RedeCredenciadaPlanos?operadora=SAUDE",
+    "GET",
+);
 
-curl_setopt_array($curl, [
-    CURLOPT_URL => "https://www.amil.com.br/institucional/api/InstitucionalMiddleware/RedeCredenciadaPlanos?operadora=SAUDE",
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_ENCODING => "",
-    CURLOPT_MAXREDIRS => 10,
-    CURLOPT_TIMEOUT => 30,
-    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-    CURLOPT_CUSTOMREQUEST => "GET",
-    CURLOPT_POSTFIELDS => "",
-    CURLOPT_COOKIE => "",
-]);
+$redeEncontradas = array_filter($res, function ($e) {
 
-$response = curl_exec($curl);
-$err = curl_error($curl);
+    if ($e['tipo'] == 'REDE') {
 
-curl_close($curl);
-
-if ($err) {
-    echo "cURL Error #:" . $err;
-} else {
-
-
-    $res = json_decode($response, true);
-
-    $redeEncontradas = array_filter($res, function ($e) {
-
-        if ($e['tipo'] == 'REDE') {
-
-            $contexto = $e['contexto'];
-            if ($contexto == "ONEHEALTH") {
-                $idOperadora = 5;
-            } elseif ($contexto == "AMIL") {
-                $idOperadora = 2;
-            } elseif ($contexto == "NEXT") {
-                $idOperadora = 8;
-            }
-
-            // echo "REDE: " . $e['codigoRede'] . " - " . $e['nomeDoPlano'] . " \n";
-
-            if (getByNameRede($e['nomeDoPlano'], $idOperadora)) return true;
-        }
-        return false;
-    });
-
-
-    foreach ($redeEncontradas as $rede) {
-
-        $codigoRede = $rede['codigoRede'];
-        $contexto = $rede['contexto'];
-        $nomeRede = $rede['nomeDoPlano'];
-        $operadora = $rede['operadora'];
-
+        $contexto = $e['contexto'];
         if ($contexto == "ONEHEALTH") {
             $idOperadora = 5;
         } elseif ($contexto == "AMIL") {
@@ -87,43 +41,54 @@ if ($err) {
             $idOperadora = 8;
         }
 
-        $redeRes = getByNameRede($nomeRede, $idOperadora);
-        $idRede = $redeRes->getId();
+        if (getByNameRede($e['nomeDoPlano'], $idOperadora)) {
+            return true;
+        }
+    }
+    return false;
+});
 
-        echo "\n-------------------------------------------------------------\n";
-        echo "NOME REDE: $nomeRede (ID: $idRede)\n\n";
 
-        // obter os tipos de serviços
+foreach ($redeEncontradas as $rede) {
 
-        $curl = curl_init();
+    $codigoRede = $rede['codigoRede'];
+    $contexto = $rede['contexto'];
+    $nomeRede = $rede['nomeDoPlano'];
+    $operadora = $rede['operadora'];
 
-        $url =  str_replace(" ", "%20", "https://www.amil.com.br/institucional/api/InstitucionalMiddleware/RedeCredenciadaTipoServico/$codigoRede/SAUDE/$estado/$municipio/$bairro/");
-        // echo $url . "\n";
+    if ($contexto == "ONEHEALTH") {
+        $idOperadora = 5;
+    } elseif ($contexto == "AMIL") {
+        $idOperadora = 2;
+    } elseif ($contexto == "NEXT") {
+        $idOperadora = 8;
+    }
 
-        curl_setopt_array($curl, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "GET",
-            CURLOPT_POSTFIELDS => "",
-            CURLOPT_COOKIE => "",
-        ]);
+    $redeRes = getByNameRede($nomeRede, $idOperadora);
+    $idRede = $redeRes->getId();
 
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
+    echo "\n-------------------------------------------------------------\n";
+    echo "NOME REDE: $nomeRede (ID: $idRede)\n\n";
 
-        curl_close($curl);
+    $resMunicipios = sendRequest(
+        "https://www.amil.com.br/institucional/api/InstitucionalMiddleware/RedeCredenciadaMunicipio/$codigoRede/SAUDE/$estado",
+        "GET",
+    );
 
-        if ($err) {
-            echo "cURL Error #:" . $err;
-        } else {
+    foreach ($resMunicipios as $municipioRes) {
 
-            // echo $response;
+        $municipio = $municipioRes['Municipio'];
 
-            $resTipoServico = json_decode($response, true);
+        $sql = "SELECT * from tbl_cidade where nome like '$municipio' and estado = 26;";
+        $select = mysqli_query($conect, $sql);
+
+        if ($rs = mysqli_fetch_assoc($select)) {
+            $idCidade = $rs['id'];
+
+            $resTipoServico = sendRequest(
+                "https://www.amil.com.br/institucional/api/InstitucionalMiddleware/RedeCredenciadaTipoServico/$codigoRede/SAUDE/$estado/$municipio/$bairro/",
+                "GET",
+            );
 
             foreach ($resTipoServico as $tipoServico) {
                 $idTipoServico = 0;
@@ -248,12 +213,6 @@ if ($err) {
                                     foreach ($prestadores as $prestador) {
                                         $idEstabelecimento = 0;
                                         $nomePrestador = $prestador['nomePrestador'];
-                                        $nomeFantasia = $prestador['nomeFantasia'];
-                                        $subRegiao = $prestador['subRegiao'];
-                                        $subRegiao = $prestador['subRegiao'];
-                                        $emails = $prestador['email'];
-                                        $site = $prestador['site'];
-
                                         $documento = $prestador['documento'];
                                         $tipoPessoa = $prestador['tipoPessoa'];
 
@@ -265,133 +224,136 @@ if ($err) {
                                             $id_tipo_estabelecimento = 1;
                                         }
                                         $documento = str_replace("#", "0", Mask($tipoMask, $documento));
-                                        
 
-                                        $sqlEstabelecimento = "SELECT * FROM estabelecimento where documento like '$documento';";
-                                        $selectEstabelecimento = mysqli_query($conect, $sqlEstabelecimento);
-                                        if ($rsEstabelecimento = mysqli_fetch_assoc($selectEstabelecimento)) {
-                                            $idEstabelecimento = $rsEstabelecimento['id'];
-                                        } else {
-                                            if ($salvarNovoEstabelecimento) {
-                                                $insert = "INSERT INTO estabelecimento 
-                                                            (id_tipo_estabelecimento, documento, razao_social, nome_fantasia, email, site) VALUES 
-                                                            ('$id_tipo_estabelecimento', '$documento', '$nomePrestador', '$nomeFantasia', '$emails', '$site');";
-                                                mysqli_query($conect, $insert);
-                                                $idEstabelecimento = mysqli_insert_id($conect);
-                                            }
-                                        }
-
-                                        if ($logPrestadores) {
-                                            echo "\n\nNOME PRESTADOR: $nomePrestador \n$tipoMask: $documento\n";
-                                        }
+                                        if ($nomePrestador != "" && $nomePrestador != "U" && $nomePrestador != "N" && $documento != "00.000.000/0000-00") {
+                                            $nomeFantasia = $prestador['nomeFantasia'];
+                                            $subRegiao = $prestador['subRegiao'];
+                                            $subRegiao = $prestador['subRegiao'];
+                                            $emails = $prestador['email'];
+                                            $site = $prestador['site'];
 
 
 
-                                        if ($idEstabelecimento > 0) {
-                                            $enderecos = $prestador['enderecoRedeCredenciada'];
-                                            foreach ($enderecos as $endereco) {
-                                                $tipoLogradouro = $endereco['tipoLogradouro'];
-                                                $numero = $endereco['numero'];
-                                                $logradouro = $endereco['logradouro'];
-                                                $complemento = $endereco['complemento'];
-                                                $municipio = $endereco['municipio'];
-                                                $nomeBairro = $endereco['bairroRedeCredenciada'];
-                                                $uf = $endereco['uf'];
-                                                $cep = Mask("cep", $endereco['cep']);
 
-                                                $ddd1 = $endereco['ddd1'];
-                                                $fone1 = $endereco['fone1'];
 
-                                                $telefone1 = "";
-                                                if ($ddd1 > 0) {
-                                                    $telefone1 = Mask("telefone", $ddd1 . $fone1);
-                                                }
-
-                                                $ddd2 = $endereco['ddd2'];
-                                                $fone2 = $endereco['fone2'];
-                                                $telefone2 = "";
-                                                if ($ddd2 > 0) {
-                                                    $telefone2 = Mask("telefone", $ddd2 . $fone2);
-                                                }
-
-                                                // Verificar se tem o bairro cadastrado no sistema, se nao tiver cadastrar
-                                                $sql = "SELECT * from tbl_bairro where nome like '$nomeBairro' and id_cidade = 5270;";
-                                                $result = mysqli_query($conect, $sql);
-                                                if (mysqli_num_rows($result) > 0) {
-                                                    // echo "Já Existe => $nomeBairro\n";
-                                                } else {
-                                                    $insert = "INSERT INTO tbl_bairro (nome, id_cidade) VALUES ('$nomeBairro', 5270);";
+                                            $sqlEstabelecimento = "SELECT * FROM estabelecimento where documento like '$documento';";
+                                            $selectEstabelecimento = mysqli_query($conect, $sqlEstabelecimento);
+                                            if ($rsEstabelecimento = mysqli_fetch_assoc($selectEstabelecimento)) {
+                                                $idEstabelecimento = $rsEstabelecimento['id'];
+                                            } else {
+                                                if ($salvarNovoEstabelecimento) {
+                                                    $insert = "INSERT INTO estabelecimento 
+                                                                (id_tipo_estabelecimento, documento, razao_social, nome_fantasia, email, site) VALUES 
+                                                                ('$id_tipo_estabelecimento', '$documento', '$nomePrestador', '$nomeFantasia', '$emails', '$site');";
                                                     mysqli_query($conect, $insert);
-                                                    echo "INSERIDO => $nomeBairro\n";
+                                                    $idEstabelecimento = mysqli_insert_id($conect);
+                                                }
+                                            }
+
+                                            if ($logPrestadores) {
+                                                echo "\n\nNOME PRESTADOR: $nomePrestador \n$tipoMask: $documento\n";
+                                            }
+
+
+
+                                            if ($idEstabelecimento > 0) {
+                                                $enderecos = $prestador['enderecoRedeCredenciada'];
+                                                foreach ($enderecos as $endereco) {
+                                                    $tipoLogradouro = $endereco['tipoLogradouro'];
+                                                    $numero = $endereco['numero'];
+                                                    $logradouro = $endereco['logradouro'];
+                                                    $complemento = $endereco['complemento'];
+                                                    $municipio = $endereco['municipio'];
+                                                    $nomeBairro = $endereco['bairroRedeCredenciada'];
+                                                    $uf = $endereco['uf'];
+                                                    $cep = Mask("cep", $endereco['cep']);
+
+                                                    $ddd1 = $endereco['ddd1'];
+                                                    $fone1 = $endereco['fone1'];
+
+                                                    $telefone1 = "";
+                                                    if ($ddd1 > 0) {
+                                                        $telefone1 = Mask("telefone", $ddd1 . $fone1);
+                                                    }
+
+                                                    $ddd2 = $endereco['ddd2'];
+                                                    $fone2 = $endereco['fone2'];
+                                                    $telefone2 = "";
+                                                    if ($ddd2 > 0) {
+                                                        $telefone2 = Mask("telefone", $ddd2 . $fone2);
+                                                    }
+
+                                                    // Verificar se tem o bairro cadastrado no sistema, se nao tiver cadastrar
+                                                    $sql = "SELECT * from tbl_bairro where nome like '$nomeBairro' and id_cidade = $idCidade;";
+                                                    $result = mysqli_query($conect, $sql);
+                                                    if (mysqli_num_rows($result) > 0) {
+                                                        // echo "Já Existe => $nomeBairro\n";
+                                                    } else {
+                                                        $insert = "INSERT INTO tbl_bairro (nome, id_cidade) VALUES ('$nomeBairro', $idCidade);";
+                                                        mysqli_query($conect, $insert);
+                                                        echo "INSERIDO => $nomeBairro\n";
+                                                    }
+
+                                                    $sql = "SELECT 
+                                                                e.id AS id_estado, c.id AS id_cidade, b.id AS id_bairro
+                                                            FROM
+                                                                tbl_estado AS e
+                                                                    inner JOIN
+                                                                tbl_cidade AS c ON c.estado = e.id
+                                                                    inner JOIN
+                                                                tbl_bairro AS b ON b.id_cidade = c.id
+                                                            WHERE
+                                                                e.uf LIKE '$estado'
+                                                                    AND c.nome LIKE '$municipio'
+                                                                    AND b.nome LIKE '$nomeBairro';";
+
+                                                    $select = mysqli_query($conect, $sql);
+
+                                                    if ($rsRegiao = mysqli_fetch_assoc($select)) {
+                                                        $idEstado = $rsRegiao['id_estado'];
+                                                        $idCidade = $rsRegiao['id_cidade'];
+                                                        $idBairro = $rsRegiao['id_bairro'];
+                                                    }
+
+                                                    $sql = "SELECT * from tbl_estabelecimento_endereco where cep like '$cep' and id_estabelecimento = $idEstabelecimento;";
+                                                    $result =  mysqli_query($conect, $sql);
+                                                    if (mysqli_num_rows($result) == 0) {
+                                                        $insertEndereco = "INSERT INTO tbl_estabelecimento_endereco
+                                                                        (id_estabelecimento, cep, complemento, logradouro, numero, id_bairro, id_cidade, id_estado, telefone1, telefone2) VALUES 
+                                                                        ($idEstabelecimento, '$cep', '$complemento', '$tipoLogradouro $logradouro', '$numero', $idBairro, $idCidade, $idEstado, '$telefone1', '$telefone2' );";
+
+                                                        mysqli_query($conect, $insertEndereco);
+                                                    }
+
+
+
+
+
+
+                                                    if ($logPrestadores) {
+                                                        echo "ENDEREÇO: $tipoLogradouro $logradouro \nCEP: $cep \nTELEFONE1: $telefone1 \nTELEFONE2: $telefone2\n";
+                                                    }
                                                 }
 
-                                                $sql = "SELECT 
-                                                            e.id AS id_estado, c.id AS id_cidade, b.id AS id_bairro
-                                                        FROM
-                                                            tbl_estado AS e
-                                                                inner JOIN
-                                                            tbl_cidade AS c ON c.estado = e.id
-                                                                inner JOIN
-                                                            tbl_bairro AS b ON b.id_cidade = c.id
-                                                        WHERE
-                                                            e.uf LIKE '$estado'
-                                                                AND c.nome LIKE '$municipio'
-                                                                AND b.nome LIKE '$nomeBairro';";
-
-                                                $select = mysqli_query($conect, $sql);
-
-                                                if ($rsRegiao = mysqli_fetch_assoc($select)) {
-                                                    $idEstado = $rsRegiao['id_estado'];
-                                                    $idCidade = $rsRegiao['id_cidade'];
-                                                    $idBairro = $rsRegiao['id_bairro'];
-                                                }
-
-                                                $sql = "select * from tbl_estabelecimento_endereco where cep like '$cep' and id_estabelecimento = $idEstabelecimento;";
+                                                // Cadastrar Rede Credenciada
+                                                $sql = "SELECT * from rede_credenciada where id_rede = $idRede and id_estabelecimento = $idEstabelecimento and id_tipo_servico = $idTipoServico and id_especialidade = $idEspecialidade;";
                                                 $result =  mysqli_query($conect, $sql);
                                                 if (mysqli_num_rows($result) == 0) {
-                                                    $insertEndereco = "INSERT INTO tbl_estabelecimento_endereco
-                                                                    (id_estabelecimento, cep, complemento, logradouro, numero, id_bairro, id_cidade, id_estado, telefone1, telefone2) VALUES 
-                                                                    ($idEstabelecimento, '$cep', '$complemento', '$tipoLogradouro $logradouro', '$numero', $idBairro, $idCidade, $idEstado, '$telefone1', '$telefone2' );";
+                                                    $insertRedeCredenciada = "INSERT INTO rede_credenciada
+                                                                        (id_rede, id_estabelecimento, id_tipo_servico, id_especialidade) VALUES 
+                                                                        ($idRede, $idEstabelecimento, $idTipoServico, $idEspecialidade);";
 
-                                                    mysqli_query($conect, $insertEndereco);
-                                                }
-
-
-
-
-
-
-                                                if ($logPrestadores) {
-                                                    echo "ENDEREÇO: $tipoLogradouro $logradouro \nCEP: $cep \nTELEFONE1: $telefone1 \nTELEFONE2: $telefone2\n";
+                                                    mysqli_query($conect, $insertRedeCredenciada);
                                                 }
                                             }
-
-                                            // Cadastrar Rede Credenciada
-                                            $sql = "SELECT * from rede_credenciada where id_rede = $idRede and id_estabelecimento = $idEstabelecimento and id_tipo_servico = $idTipoServico and id_especialidade = $idEspecialidade;";
-                                            $result =  mysqli_query($conect, $sql);
-                                            if (mysqli_num_rows($result) == 0) {
-                                                $insertRedeCredenciada = "INSERT INTO rede_credenciada
-                                                                    (id_rede, id_estabelecimento, id_tipo_servico, id_especialidade) VALUES 
-                                                                    ($idRede, $idEstabelecimento, $idTipoServico, $idEspecialidade);";
-
-                                                mysqli_query($conect, $insertRedeCredenciada);
-                                            }
-
-                                            
                                         }
                                     }
-
-                                    
                                 }
                             }
                         }
-
-                        
                     }
                 }
             }
-
-            
         }
     }
 }
